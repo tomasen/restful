@@ -27,7 +27,7 @@ type Client struct {
 	// keyFile holds the key file as a string.
 	keyFile string
 	// tlsConfig holds the TLS configuration for the client, and will
-	// set the scheme to https in NewDockerCli if present.
+	// set the scheme to https in NewClient if present.
 	tlsConfig *tls.Config
 	// scheme holds the scheme of the client i.e. https.
 	scheme string

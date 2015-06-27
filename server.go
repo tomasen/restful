@@ -36,7 +36,7 @@ func NewServer(cfg *Config) *Server {
 
 type ServFunc func(w http.ResponseWriter, r *http.Request, vars map[string]string, body io.ReadCloser) (int, interface{}, error)
 
-// Serve loops through all of the protocols sent in to docker and spawns
+// Serve loops through all of the protocols sent in to spawns
 // off a go routine to setup a serving http.Server for each.
 func (s *Server) Prepare(protoAddrs []string, m map[string]map[string]ServFunc) error {
 	s.createRouter(m, s.cfg)
@@ -229,7 +229,7 @@ func (s *Server) newServer(proto, addr string) ([]serverCloser, error) {
 		}
 		ls = append(ls, l)
 	case "unix":
-		l, err := NewUnixSocket(addr, s.cfg.SocketGroup, s.start)
+		l, err := newUnixSocket(addr, s.cfg.SocketGroup, s.start)
 		if err != nil {
 			return nil, err
 		}
@@ -250,7 +250,7 @@ func (s *Server) newServer(proto, addr string) ([]serverCloser, error) {
 	return res, nil
 }
 
-func NewUnixSocket(path, group string, activate <-chan struct{}) (net.Listener, error) {
+func newUnixSocket(path, group string, activate <-chan struct{}) (net.Listener, error) {
 	if err := syscall.Unlink(path); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
@@ -276,10 +276,7 @@ func setSocketGroup(path, group string) error {
 		return nil
 	}
 	if err := changeGroup(path, group); err != nil {
-		if group != "docker" {
-			return err
-		}
-		logrus.Debugf("Warning: could not change group %s to docker: %v", path, err)
+		logrus.Debugf("Warning: could not change group %s to %v: %v", path, group, err)
 	}
 	return nil
 }
