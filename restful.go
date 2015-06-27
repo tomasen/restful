@@ -11,6 +11,9 @@ import (
 	"github.com/docker/docker/api"
 )
 
+// FIXME: where is version number came from? (1.20?)
+// FIXME: remove 1 logrus
+
 type Config struct {
 	Logging     bool
 	EnableCors  bool

@@ -8,12 +8,9 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
-	"os/signal"
 	"reflect"
 	"runtime/debug"
 	"strconv"
-	"syscall"
 	"testing"
 
 	"github.com/Sirupsen/logrus"
@@ -75,8 +72,9 @@ type T struct {
 }
 
 func (t *T) ping(w http.ResponseWriter, r *http.Request, vars map[string]string, body io.ReadCloser) (int, interface{}, error) {
+	w.WriteHeader(http.StatusOK)
 	_, err := w.Write([]byte{'O', 'K'})
-	return http.StatusOK, nil, err
+	return 0, nil, err
 }
 
 func (t *T) postFoobarCreate(w http.ResponseWriter, r *http.Request, vars map[string]string, body io.ReadCloser) (int, interface{}, error) {
@@ -102,15 +100,15 @@ func (t *T) postFoobarCreate(w http.ResponseWriter, r *http.Request, vars map[st
 }
 
 func (t *T) deleteFoobars(w http.ResponseWriter, r *http.Request, vars map[string]string, body io.ReadCloser) (int, interface{}, error) {
-	list := map[string]string{
-		"id":   "1",
-		"name": vars["name"],
-	}
-	return http.StatusNoContent, list, nil
+	return http.StatusNoContent, nil, nil
 }
 
 func (t *T) optionsHandler(w http.ResponseWriter, r *http.Request, vars map[string]string, body io.ReadCloser) (int, interface{}, error) {
-	return http.StatusOK, nil, nil
+	opt := map[string]int{
+		"foo": 1,
+		"bar": 2,
+	}
+	return http.StatusOK, opt, nil
 }
 
 func TestRestful(t *testing.T) {
@@ -150,10 +148,10 @@ func TestRestful(t *testing.T) {
 
 	p := []string{"tcp://0.0.0.0:65436"}
 
-logrus.Info("t0")
+
 	go s.Serve(p, model)
 
-logrus.Info("t1")
+	// TODO: fail if port already been occupied
 	s.AcceptConnections()
 
 	c := NewClient("", "tcp", "127.0.0.1:65436", nil)
@@ -163,26 +161,36 @@ logrus.Info("t1")
 	if err != nil {
 		t.Fatalf("GET test failed %v", err)
 	}
-	
-	logrus.Info("t2")
 
 	r, _, n, err = c.Call("POST",
 		"/foobar/create/foo",
 		map[string]int{"foo": 1, "bar": 2},
 		map[string][]string{"foo": []string{"bar"}},
 	)
-	logrus.Infof("%v %v", r, n)
 	err = EqualTest(r, n, err, []byte("{\"form\":\"\",\"id\":\"1\",\"json\":\"{\\\"bar\\\":2,\\\"foo\\\":1}\",\"type\":\"foo\"}\n"), http.StatusCreated)
 	if err != nil {
 		t.Fatalf("POST test failed %v", err)
+
 	}
 
-	// TODO: add more client tests
+	r, _, n, err = c.Call("DELETE",
+		"/foobar/foo",
+		nil,
+		nil,
+	)
+	err = EqualTest(r, n, err, nil, http.StatusNoContent)
+	if err != nil {
+		t.Fatalf("DELETE test failed %v", err)
+	}
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
-	for _ = range sigChan {
-		os.Exit(0)
+	r, _, n, err = c.Call("OPTIONS",
+		"",
+		nil,
+		nil,
+	)
+	err = EqualTest(r, n, err, []byte("{\"bar\":2,\"foo\":1}\n"), http.StatusOK)
+	if err != nil {
+		t.Fatalf("OPTIONS test failed %v", err)
 	}
 
 	s.Close()
@@ -195,10 +203,13 @@ func EqualTest(r io.ReadCloser, n0 int, err error, b1 []byte, n1 int) error {
 
 	if b1 != nil {
 		b0, err := ioutil.ReadAll(r)
-		logrus.Info(string(b0))
 		if err != nil || bytes.Compare(b0, b1) != 0 {
-			return fmt.Errorf("result does not match")
+			return fmt.Errorf("response does not match")
 		}
+	}
+
+	if n0 != n1 {
+		return fmt.Errorf("status code does not match %v %v", n0, n1)
 	}
 	return nil
 }

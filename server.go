@@ -66,14 +66,14 @@ func (s *Server) Serve(protoAddrs []string, m map[string]map[string]ServFunc) er
 			}(srv)
 		}
 	}
-	logrus.Info("n0")
+
 	for i := 0; i < len(protoAddrs); i++ {
 		err := <-chErrors
 		if err != nil {
 			return err
 		}
 	}
-	logrus.Info("n1")
+
 	return nil
 }
 
@@ -187,8 +187,11 @@ func makeHttpHandler(logging bool, localMethod string, localRoute string, handle
 			httpError(w, err)
 		}
 
-		if out != nil {
+		switch {
+		case out != nil:
 			writeJSON(w, st, out)
+		case st != 0:
+			w.WriteHeader(st)
 		}
 	}
 }
