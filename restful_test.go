@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"testing"
+	"time"
 )
 
 type F struct {
@@ -144,12 +145,18 @@ func TestRestful(t *testing.T) {
 		},
 	}
 
-	p := []string{"tcp://0.0.0.0:65436"}
+	p := []string{"tcp://:65436"}
 
-	go s.Serve(p, model)
+	go func() {
+		err := s.Prepare(p, model)
+		if err != nil {
+			t.Fatalf("Server preparation failed %v", err)
+		}
+	}()
 
-	// TODO: fail if port already been occupied
 	s.AcceptConnections()
+
+	time.Sleep(1 * time.Second / 32)
 
 	c := NewClient("", "tcp", "127.0.0.1:65436", nil)
 

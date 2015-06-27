@@ -19,7 +19,7 @@ type Config struct {
 	TLSConfig   *tls.Config
 }
 
-func MatchesContentType(contentType, expectedType string) bool {
+func matchesContentType(contentType, expectedType string) bool {
 	mimetype, _, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		logrus.Errorf("Error parsing media type: %s error: %v", contentType, err)
@@ -39,7 +39,7 @@ func checkForJson(r *http.Request) error {
 	}
 
 	// Otherwise it better be json
-	if MatchesContentType(ct, "application/json") {
+	if matchesContentType(ct, "application/json") {
 		return nil
 	}
 	return fmt.Errorf("Content-Type specified (%s) must be 'application/json'", ct)

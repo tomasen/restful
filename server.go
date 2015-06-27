@@ -16,7 +16,6 @@ import (
 	"github.com/docker/docker/pkg/sockets"
 	"github.com/docker/docker/pkg/systemd"
 	"github.com/docker/libcontainer/user"
-	"github.com/docker/libnetwork/portallocator"
 	"github.com/gorilla/mux"
 )
 
@@ -30,7 +29,7 @@ type Server struct {
 func NewServer(cfg *Config) *Server {
 	srv := &Server{
 		cfg:   cfg,
-		start: make(chan struct{}),
+		start: make(chan struct{}, 1),
 	}
 	return srv
 }
@@ -39,7 +38,7 @@ type ServFunc func(w http.ResponseWriter, r *http.Request, vars map[string]strin
 
 // Serve loops through all of the protocols sent in to docker and spawns
 // off a go routine to setup a serving http.Server for each.
-func (s *Server) Serve(protoAddrs []string, m map[string]map[string]ServFunc) error {
+func (s *Server) Prepare(protoAddrs []string, m map[string]map[string]ServFunc) error {
 	s.createRouter(m, s.cfg)
 
 	var chErrors = make(chan error, len(protoAddrs))
@@ -203,9 +202,6 @@ func (s *Server) initTcpSocket(addr string) (l net.Listener, err error) {
 	if l, err = sockets.NewTcpSocket(addr, s.cfg.TLSConfig, s.start); err != nil {
 		return nil, err
 	}
-	if err := allocateDaemonPort(addr); err != nil {
-		return nil, err
-	}
 	return
 }
 
@@ -252,33 +248,6 @@ func (s *Server) newServer(proto, addr string) ([]serverCloser, error) {
 		})
 	}
 	return res, nil
-}
-
-func allocateDaemonPort(addr string) error {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return err
-	}
-
-	intPort, err := strconv.Atoi(port)
-	if err != nil {
-		return err
-	}
-
-	var hostIPs []net.IP
-	if parsedIP := net.ParseIP(host); parsedIP != nil {
-		hostIPs = append(hostIPs, parsedIP)
-	} else if hostIPs, err = net.LookupIP(host); err != nil {
-		return fmt.Errorf("failed to lookup %s address in host specification", host)
-	}
-
-	pa := portallocator.Get()
-	for _, hostIP := range hostIPs {
-		if _, err := pa.RequestPort(hostIP, "tcp", intPort); err != nil {
-			return fmt.Errorf("failed to allocate daemon listening port %d (err: %v)", intPort, err)
-		}
-	}
-	return nil
 }
 
 func NewUnixSocket(path, group string, activate <-chan struct{}) (net.Listener, error) {
