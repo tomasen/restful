@@ -2,12 +2,11 @@ package restful
 
 import (
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
-	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -23,6 +22,7 @@ import (
 
 type Server struct {
 	cfg     *Config
+	router  *mux.Router
 	start   chan struct{}
 	servers []serverCloser
 }
@@ -35,9 +35,13 @@ func NewServer(cfg *Config) *Server {
 	return srv
 }
 
-// ServeApi loops through all of the protocols sent in to docker and spawns
+type ServFunc func(w http.ResponseWriter, r *http.Request, vars map[string]string, body io.ReadCloser) (int, interface{}, error)
+
+// Serve loops through all of the protocols sent in to docker and spawns
 // off a go routine to setup a serving http.Server for each.
-func (s *Server) Serve(protoAddrs []string, m map[string]map[string]Api) error {
+func (s *Server) Serve(protoAddrs []string, m map[string]map[string]ServFunc) error {
+	s.createRouter(m, s.cfg)
+
 	var chErrors = make(chan error, len(protoAddrs))
 
 	for _, protoAddr := range protoAddrs {
@@ -53,26 +57,34 @@ func (s *Server) Serve(protoAddrs []string, m map[string]map[string]Api) error {
 		s.servers = append(s.servers, srvs...)
 
 		for _, srv := range srvs {
-			srv.createRouter(m, s.cfg)
-
 			logrus.Infof("Listening for HTTP on %s (%s)", protoAddrParts[0], protoAddrParts[1])
 			go func(v serverCloser) {
-				if err := srv.Serve(); err != nil && strings.Contains(err.Error(), "use of closed network connection") {
+				if err := v.Serve(); err != nil && strings.Contains(err.Error(), "use of closed network connection") {
 					err = nil
 				}
 				chErrors <- err
 			}(srv)
 		}
 	}
-
+	logrus.Info("n0")
 	for i := 0; i < len(protoAddrs); i++ {
 		err := <-chErrors
 		if err != nil {
 			return err
 		}
 	}
-
+	logrus.Info("n1")
 	return nil
+}
+
+func (s *Server) AcceptConnections() {
+	go systemd.SdNotify("READY=1")
+	// close the lock so the listeners start accepting connections
+	select {
+	case <-s.start:
+	default:
+		close(s.start)
+	}
 }
 
 func (s *Server) Close() {
@@ -86,13 +98,11 @@ func (s *Server) Close() {
 type serverCloser interface {
 	Serve() error
 	Close() error
-	createRouter(map[string]map[string]Api, *Config)
 }
 
 type HttpServer struct {
 	srv *http.Server
 	l   net.Listener
-	mux *mux.Router
 }
 
 func (s *HttpServer) Serve() error {
@@ -102,8 +112,8 @@ func (s *HttpServer) Close() error {
 	return s.l.Close()
 }
 
-func (s *HttpServer) createRouter(m map[string]map[string]Api, cfg *Config) {
-	s.mux = mux.NewRouter()
+func (s *Server) createRouter(m map[string]map[string]ServFunc, cfg *Config) {
+	s.router = mux.NewRouter()
 
 	// If "api-cors-header" is not given, but "api-enable-cors" is true, we set cors to "*"
 	// otherwise, all head values will be passed to HTTP handler
@@ -113,29 +123,30 @@ func (s *HttpServer) createRouter(m map[string]map[string]Api, cfg *Config) {
 	}
 
 	for method, routes := range m {
-		for route, api := range routes {
+		for route, fct := range routes {
 			logrus.Debugf("Registering %s, %s", method, route)
 			// NOTE: scope issue, make sure the variables are local and won't be changed
 			localRoute := route
+			localFct := fct
 			localMethod := method
 
 			// build the handler function
-			f := makeHttpHandler(cfg.Logging, localMethod, localRoute, api, corsHeaders)
+			f := makeHttpHandler(cfg.Logging, localMethod, localRoute, localFct, corsHeaders)
 
 			// add the new route
 			if localRoute == "" {
-				s.mux.Methods(localMethod).HandlerFunc(f)
+				s.router.Methods(localMethod).HandlerFunc(f)
 			} else {
-				s.mux.Path("/v{version:[0-9.]+}" + localRoute).Methods(localMethod).HandlerFunc(f)
-				s.mux.Path(localRoute).Methods(localMethod).HandlerFunc(f)
+				s.router.Path("/v{version:[0-9.]+}" + localRoute).Methods(localMethod).HandlerFunc(f)
+				s.router.Path(localRoute).Methods(localMethod).HandlerFunc(f)
 			}
 		}
 	}
 
-	s.srv.Handler = s.mux
+	return
 }
 
-func makeHttpHandler(logging bool, localMethod string, localRoute string, api Api, corsHeaders string) http.HandlerFunc {
+func makeHttpHandler(logging bool, localMethod string, localRoute string, handlerFunc ServFunc, corsHeaders string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// log the request
 		logrus.Debugf("Calling %s %s", localMethod, localRoute)
@@ -148,8 +159,10 @@ func makeHttpHandler(logging bool, localMethod string, localRoute string, api Ap
 			writeCorsHeaders(w, r, corsHeaders)
 		}
 
-		var params []reflect.Value
-		params = append(params, reflect.ValueOf(w), reflect.ValueOf(r), reflect.ValueOf(mux.Vars(r)))
+		switch localMethod {
+		case "POST", "DELETE":
+			parseMultipartForm(r)
+		}
 
 		// If contentLength is -1, we can assumed chunked encoding
 		// or more technically that the length is unknown
@@ -157,6 +170,7 @@ func makeHttpHandler(logging bool, localMethod string, localRoute string, api Ap
 		// net/http otherwise seems to swallow any headers related to chunked encoding
 		// including r.TransferEncoding
 		// allow a nil body for backwards compatibility
+		var body io.ReadCloser
 		if r.Body != nil && (r.ContentLength > 0 || r.ContentLength == -1) {
 			if err := checkForJson(r); err != nil {
 				// post body must be json
@@ -164,31 +178,17 @@ func makeHttpHandler(logging bool, localMethod string, localRoute string, api Ap
 				httpError(w, err)
 				return
 			}
-
-			in := reflect.New(api.TypeIn)
-			err := json.NewDecoder(r.Body).Decode(in)
-			r.Body.Close()
-			if err != nil {
-				logrus.Errorf("Post body decode returned error: %s", err)
-				httpError(w, err)
-				return
-			}
-
-			params = append(params, reflect.ValueOf(in))
+			body = r.Body
 		}
 
-		results := api.Target.Call(params)
-		s := int(results[0].Int())
-
-		if results[2].IsValid() {
-			err, _ := results[2].Interface().(error)
+		st, out, err := handlerFunc(w, r, mux.Vars(r), body)
+		if err != nil {
 			logrus.Errorf("Handler for %s %s returned error: %s", localMethod, localRoute, err)
 			httpError(w, err)
-			return
 		}
 
-		if results[1].IsValid() {
-			writeJSON(w, s, results[1].Interface())
+		if out != nil {
+			writeJSON(w, st, out)
 		}
 	}
 }
@@ -242,10 +242,10 @@ func (s *Server) newServer(proto, addr string) ([]serverCloser, error) {
 	for _, l := range ls {
 		res = append(res, &HttpServer{
 			&http.Server{
-				Addr: addr,
+				Addr:    addr,
+				Handler: s.router,
 			},
 			l,
-			nil,
 		})
 	}
 	return res, nil

@@ -1,10 +1,22 @@
 package restful
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"reflect"
+	"runtime/debug"
 	"strconv"
+	"syscall"
 	"testing"
+
+	"github.com/Sirupsen/logrus"
 )
 
 type F struct {
@@ -59,15 +71,55 @@ func BenchmarkReflect(b *testing.B) {
 	}
 }
 
-type Srv struct {
+type T struct {
 }
 
-func (s *Srv) ping(w http.ResponseWriter) (int, []byte, error) {
+func (t *T) ping(w http.ResponseWriter, r *http.Request, vars map[string]string, body io.ReadCloser) (int, interface{}, error) {
 	_, err := w.Write([]byte{'O', 'K'})
-	return 0, nil, err
+	return http.StatusOK, nil, err
+}
+
+func (t *T) postFoobarCreate(w http.ResponseWriter, r *http.Request, vars map[string]string, body io.ReadCloser) (int, interface{}, error) {
+	var v map[string]int
+
+	err := json.NewDecoder(body).Decode(&v)
+	if err != nil {
+		return http.StatusInternalServerError, nil, err
+	}
+
+	b, err := json.Marshal(v)
+	if err != nil {
+		return http.StatusInternalServerError, nil, err
+	}
+
+	ret := map[string]string{
+		"id":   "1",
+		"type": vars["type"],
+		"form": r.Form.Get("foo"),
+		"json": string(b),
+	}
+	return http.StatusCreated, ret, nil
+}
+
+func (t *T) deleteFoobars(w http.ResponseWriter, r *http.Request, vars map[string]string, body io.ReadCloser) (int, interface{}, error) {
+	list := map[string]string{
+		"id":   "1",
+		"name": vars["name"],
+	}
+	return http.StatusNoContent, list, nil
+}
+
+func (t *T) optionsHandler(w http.ResponseWriter, r *http.Request, vars map[string]string, body io.ReadCloser) (int, interface{}, error) {
+	return http.StatusOK, nil, nil
 }
 
 func TestRestful(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Println("Recovered in", r, ":")
+			log.Println(string(debug.Stack()))
+		}
+	}()
 
 	cfg := &Config{
 		Logging:     true,
@@ -79,32 +131,74 @@ func TestRestful(t *testing.T) {
 
 	s := NewServer(cfg)
 
-	srv := new(Srv)
+	t0 := new(T)
 
-	model := map[string]map[string]Api{
+	model := map[string]map[string]ServFunc{
 		"GET": {
-			"/_ping": Api{
-				reflect.TypeOf(nil),
-				reflect.TypeOf(new([]byte)),
-				reflect.ValueOf(srv),
-				reflect.ValueOf(srv.ping),
-			},
+			"/ping": t0.ping,
 		},
 		"POST": {
-		//	"/containers/create/{type:.*}": s.postContainersCreate,
+			"/foobar/create/{type:.*}": t0.postFoobarCreate,
 		},
 		"DELETE": {
-		//	"/containers/{name:.*}": s.deleteContainers,
+			"/foobar/{name:.*}": t0.deleteFoobars,
 		},
 		"OPTIONS": {
-		//	"": s.optionsHandler,
+			"": t0.optionsHandler,
 		},
 	}
 
-	p := []string{":65436"}
+	p := []string{"tcp://0.0.0.0:65436"}
 
-	s.Serve(p, model)
+logrus.Info("t0")
+	go s.Serve(p, model)
 
-	// TODO: add client test
+logrus.Info("t1")
+	s.AcceptConnections()
+
+	c := NewClient("", "tcp", "127.0.0.1:65436", nil)
+
+	r, _, n, err := c.Call("GET", "/ping", nil, nil)
+	err = EqualTest(r, n, err, []byte("OK"), http.StatusOK)
+	if err != nil {
+		t.Fatalf("GET test failed %v", err)
+	}
+	
+	logrus.Info("t2")
+
+	r, _, n, err = c.Call("POST",
+		"/foobar/create/foo",
+		map[string]int{"foo": 1, "bar": 2},
+		map[string][]string{"foo": []string{"bar"}},
+	)
+	logrus.Infof("%v %v", r, n)
+	err = EqualTest(r, n, err, []byte("{\"form\":\"\",\"id\":\"1\",\"json\":\"{\\\"bar\\\":2,\\\"foo\\\":1}\",\"type\":\"foo\"}\n"), http.StatusCreated)
+	if err != nil {
+		t.Fatalf("POST test failed %v", err)
+	}
+
+	// TODO: add more client tests
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+	for _ = range sigChan {
+		os.Exit(0)
+	}
+
 	s.Close()
+}
+
+func EqualTest(r io.ReadCloser, n0 int, err error, b1 []byte, n1 int) error {
+	if err != nil {
+		return err
+	}
+
+	if b1 != nil {
+		b0, err := ioutil.ReadAll(r)
+		logrus.Info(string(b0))
+		if err != nil || bytes.Compare(b0, b1) != 0 {
+			return fmt.Errorf("result does not match")
+		}
+	}
+	return nil
 }

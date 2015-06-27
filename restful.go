@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"reflect"
 	"strings"
 
 	"github.com/Sirupsen/logrus"
@@ -18,13 +17,6 @@ type Config struct {
 	CorsHeaders string
 	SocketGroup string
 	TLSConfig   *tls.Config
-}
-
-type Api struct {
-	TypeIn  reflect.Type
-	TypeOut reflect.Type
-	Target  reflect.Value
-	Func    reflect.Value
 }
 
 // Check to make sure request's Content-Type is application/json
@@ -43,6 +35,24 @@ func checkForJson(r *http.Request) error {
 		return nil
 	}
 	return fmt.Errorf("Content-Type specified (%s) must be 'application/json'", ct)
+}
+
+//If we don't do this, POST method without Content-type (even with empty body) will fail
+func parseForm(r *http.Request) error {
+	if r == nil {
+		return nil
+	}
+	if err := r.ParseForm(); err != nil && !strings.HasPrefix(err.Error(), "mime:") {
+		return err
+	}
+	return nil
+}
+
+func parseMultipartForm(r *http.Request) error {
+	if err := r.ParseMultipartForm(4096); err != nil && !strings.HasPrefix(err.Error(), "mime:") {
+		return err
+	}
+	return nil
 }
 
 func writeCorsHeaders(w http.ResponseWriter, r *http.Request, corsHeaders string) {
