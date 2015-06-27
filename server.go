@@ -99,15 +99,15 @@ type serverCloser interface {
 	Close() error
 }
 
-type HttpServer struct {
+type httpServer struct {
 	srv *http.Server
 	l   net.Listener
 }
 
-func (s *HttpServer) Serve() error {
+func (s *httpServer) Serve() error {
 	return s.srv.Serve(s.l)
 }
-func (s *HttpServer) Close() error {
+func (s *httpServer) Close() error {
 	return s.l.Close()
 }
 
@@ -239,7 +239,7 @@ func (s *Server) newServer(proto, addr string) ([]serverCloser, error) {
 	}
 	var res []serverCloser
 	for _, l := range ls {
-		res = append(res, &HttpServer{
+		res = append(res, &httpServer{
 			&http.Server{
 				Addr:    addr,
 				Handler: s.router,

@@ -104,7 +104,7 @@ func (c *Client) encodeData(data interface{}) (*bytes.Buffer, error) {
 	return params, nil
 }
 
-func (c *Client) HTTPClient() *http.Client {
+func (c *Client) httpClient() *http.Client {
 	return &http.Client{Transport: c.transport}
 }
 
@@ -139,7 +139,7 @@ func (c *Client) clientRequest(method, path string, in io.Reader, headers map[st
 		req.Header.Set("Content-Type", "text/plain")
 	}
 
-	resp, err := c.HTTPClient().Do(req)
+	resp, err := c.httpClient().Do(req)
 	statusCode := -1
 	if resp != nil {
 		statusCode = resp.StatusCode
