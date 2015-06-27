@@ -4,15 +4,12 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"mime"
 	"net/http"
 	"strings"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/docker/docker/api"
 )
-
-// FIXME: where is version number came from? (1.20?)
-// FIXME: remove 1 logrus
 
 type Config struct {
 	Logging     bool
@@ -20,6 +17,14 @@ type Config struct {
 	CorsHeaders string
 	SocketGroup string
 	TLSConfig   *tls.Config
+}
+
+func MatchesContentType(contentType, expectedType string) bool {
+	mimetype, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		logrus.Errorf("Error parsing media type: %s error: %v", contentType, err)
+	}
+	return err == nil && mimetype == expectedType
 }
 
 // Check to make sure request's Content-Type is application/json
@@ -34,7 +39,7 @@ func checkForJson(r *http.Request) error {
 	}
 
 	// Otherwise it better be json
-	if api.MatchesContentType(ct, "application/json") {
+	if MatchesContentType(ct, "application/json") {
 		return nil
 	}
 	return fmt.Errorf("Content-Type specified (%s) must be 'application/json'", ct)

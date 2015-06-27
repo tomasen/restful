@@ -12,8 +12,6 @@ import (
 	"runtime/debug"
 	"strconv"
 	"testing"
-
-	"github.com/Sirupsen/logrus"
 )
 
 type F struct {
@@ -147,7 +145,6 @@ func TestRestful(t *testing.T) {
 	}
 
 	p := []string{"tcp://0.0.0.0:65436"}
-
 
 	go s.Serve(p, model)
 

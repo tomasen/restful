@@ -12,12 +12,11 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/docker/docker/api"
 )
 
 var (
 	errConnectionRefused = errors.New("Cannot connect to the restful server")
+	Version              = "1"
 )
 
 type Client struct {
@@ -114,12 +113,12 @@ func (c *Client) clientRequest(method, path string, in io.Reader, headers map[st
 	if expectedPayload && in == nil {
 		in = bytes.NewReader([]byte{})
 	}
-	req, err := http.NewRequest(method, fmt.Sprintf("/v%s%s", api.Version, path), in)
+	req, err := http.NewRequest(method, fmt.Sprintf("/v%s%s", Version, path), in)
 	if err != nil {
 		return nil, nil, -1, err
 	}
 
-	// Add Config's HTTP Headers 
+	// Add Config's HTTP Headers
 	for k, v := range c.HttpDefaultHeaders {
 		req.Header.Set(k, v)
 	}
