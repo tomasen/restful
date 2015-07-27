@@ -1,6 +1,7 @@
 package restful
 
 import (
+	"bufio"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -15,7 +16,6 @@ import (
 	"github.com/docker/docker/pkg/listenbuffer"
 	"github.com/docker/docker/pkg/sockets"
 	"github.com/docker/docker/pkg/systemd"
-	"github.com/docker/libcontainer/user"
 	"github.com/gorilla/mux"
 )
 
@@ -291,11 +291,8 @@ func changeGroup(path string, nameOrGid string) error {
 }
 
 func lookupGidByName(nameOrGid string) (int, error) {
-	groupFile, err := user.GetGroupPath()
-	if err != nil {
-		return -1, err
-	}
-	groups, err := user.ParseGroupFileFilter(groupFile, func(g user.Group) bool {
+	groupFile := "/etc/group"
+	groups, err := parseGroupFileFilter(groupFile, func(g userGroup) bool {
 		return g.Name == nameOrGid || strconv.Itoa(g.Gid) == nameOrGid
 	})
 	if err != nil {
@@ -310,4 +307,93 @@ func lookupGidByName(nameOrGid string) (int, error) {
 		return gid, nil
 	}
 	return -1, fmt.Errorf("Group %s not found", nameOrGid)
+}
+
+type userGroup struct {
+	Name string
+	Pass string
+	Gid  int
+	List []string
+}
+
+func parseGroupFileFilter(path string, filter func(userGroup) bool) ([]userGroup, error) {
+	group, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer group.Close()
+	return parseGroupFilter(group, filter)
+}
+
+func parseGroupFilter(r io.Reader, filter func(userGroup) bool) ([]userGroup, error) {
+	if r == nil {
+		return nil, fmt.Errorf("nil source for group-formatted data")
+	}
+
+	var (
+		s   = bufio.NewScanner(r)
+		out = []userGroup{}
+	)
+
+	for s.Scan() {
+		if err := s.Err(); err != nil {
+			return nil, err
+		}
+
+		text := s.Text()
+		if text == "" {
+			continue
+		}
+
+		// see: man 5 group
+		//  group_name:password:GID:user_list
+		// Name:Pass:Gid:List
+		//  root:x:0:root
+		//  adm:x:4:root,adm,daemon
+		p := userGroup{}
+		parseLine(
+			text,
+			&p.Name, &p.Pass, &p.Gid, &p.List,
+		)
+
+		if filter == nil || filter(p) {
+			out = append(out, p)
+		}
+	}
+
+	return out, nil
+}
+
+func parseLine(line string, v ...interface{}) {
+	if line == "" {
+		return
+	}
+
+	parts := strings.Split(line, ":")
+	for i, p := range parts {
+		if len(v) <= i {
+			// if we have more "parts" than we have places to put them, bail for great "tolerance" of naughty configuration files
+			break
+		}
+
+		switch e := v[i].(type) {
+		case *string:
+			// "root", "adm", "/bin/bash"
+			*e = p
+		case *int:
+			// "0", "4", "1000"
+			// ignore string to int conversion errors, for great "tolerance" of naughty configuration files
+			*e, _ = strconv.Atoi(p)
+		case *[]string:
+			// "", "root", "root,adm,daemon"
+			if p != "" {
+				*e = strings.Split(p, ",")
+			} else {
+				*e = []string{}
+			}
+		default:
+			// panic, because this is a programming/logic error, not a runtime one
+			panic("parseLine expects only pointers!  argument " + strconv.Itoa(i) + " is not a pointer!")
+		}
+	}
 }
