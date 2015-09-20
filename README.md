@@ -1,6 +1,6 @@
 ### restful 
 
-[![Build Status](https://travis-ci.org/Tomasen/restful.svg?branch=master)](https://travis-ci.org/tomasen/restful)
+[![Build Status](https://travis-ci.org/tomasen/restful.svg?branch=master)](https://travis-ci.org/tomasen/restful)
 [![GoDoc](https://godoc.org/github.com/tomasen/restful?status.svg)](http://godoc.org/github.com/tomasen/restful)
 
 Model-driven, RESTful api server framework in golang
