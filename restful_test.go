@@ -155,6 +155,7 @@ func TestRestful(t *testing.T) {
 	}()
 
 	s.AcceptConnections()
+	defer s.Close()
 
 	time.Sleep(1 * time.Second / 32)
 
@@ -196,8 +197,6 @@ func TestRestful(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OPTIONS test failed %v", err)
 	}
-
-	s.Close()
 }
 
 func EqualTest(r io.ReadCloser, n0 int, err error, b1 []byte, n1 int) error {
