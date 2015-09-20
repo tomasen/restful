@@ -15,8 +15,10 @@ import (
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/pkg/listenbuffer"
 	"github.com/docker/docker/pkg/sockets"
-	"github.com/docker/docker/pkg/systemd"
 	"github.com/gorilla/mux"
+
+	systemdActivation "github.com/coreos/go-systemd/activation"
+	systemdDaemon "github.com/coreos/go-systemd/daemon"
 )
 
 type Server struct {
@@ -77,7 +79,7 @@ func (s *Server) Prepare(protoAddrs []string, m map[string]map[string]ServFunc) 
 }
 
 func (s *Server) AcceptConnections() {
-	go systemd.SdNotify("READY=1")
+	go systemdDaemon.SdNotify("READY=1")
 	// close the lock so the listeners start accepting connections
 	select {
 	case <-s.start:
@@ -214,7 +216,7 @@ func (s *Server) newServer(proto, addr string) ([]serverCloser, error) {
 	)
 	switch proto {
 	case "fd":
-		ls, err = systemd.ListenFD(addr)
+		ls, err = listenFD(addr)
 		if err != nil {
 			return nil, err
 		}
@@ -396,4 +398,35 @@ func parseLine(line string, v ...interface{}) {
 			panic("parseLine expects only pointers!  argument " + strconv.Itoa(i) + " is not a pointer!")
 		}
 	}
+}
+
+// listenFD returns the specified socket activated files as a slice of
+// net.Listeners or all of the activated files if "*" is given.
+func listenFD(addr string) ([]net.Listener, error) {
+	// socket activation
+	listeners, err := systemdActivation.Listeners(false)
+	if err != nil {
+		return nil, err
+	}
+
+	if listeners == nil || len(listeners) == 0 {
+		return nil, fmt.Errorf("No sockets found")
+	}
+
+	// default to all fds just like unix:// and tcp://
+	if addr == "" {
+		addr = "*"
+	}
+
+	fdNum, _ := strconv.Atoi(addr)
+	fdOffset := fdNum - 3
+	if (addr != "*") && (len(listeners) < int(fdOffset)+1) {
+		return nil, fmt.Errorf("Too few socket activated files passed in")
+	}
+
+	if addr == "*" {
+		return listeners, nil
+	}
+
+	return []net.Listener{listeners[fdOffset]}, nil
 }
