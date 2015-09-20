@@ -28,7 +28,7 @@ func matchesContentType(contentType, expectedType string) bool {
 }
 
 // Check to make sure request's Content-Type is application/json
-func checkForJson(r *http.Request) error {
+func checkForJSON(r *http.Request) error {
 	ct := r.Header.Get("Content-Type")
 
 	// No Content-Type header is ok as long as there's no Body

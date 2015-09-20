@@ -16,9 +16,11 @@ import (
 
 var (
 	errConnectionRefused = errors.New("Cannot connect to the restful server")
+	// Version indicate api version
 	Version              = "1"
 )
 
+// Client construct a restful request initiator
 type Client struct {
 	// proto holds the client protocol i.e. unix.
 	proto string
@@ -34,7 +36,7 @@ type Client struct {
 	// transport holds the client transport instance.
 	transport *http.Transport
 	// default headers
-	HttpDefaultHeaders map[string]string
+	HTTPDefaultHeaders map[string]string
 	// user agent string
 	UserAgent string
 }
@@ -119,7 +121,7 @@ func (c *Client) clientRequest(method, path string, in io.Reader, headers map[st
 	}
 
 	// Add Config's HTTP Headers
-	for k, v := range c.HttpDefaultHeaders {
+	for k, v := range c.HTTPDefaultHeaders {
 		req.Header.Set(k, v)
 	}
 

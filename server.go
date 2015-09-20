@@ -36,7 +36,7 @@ func NewServer(cfg *Config) *Server {
 
 type ServFunc func(w http.ResponseWriter, r *http.Request, vars map[string]string, body io.ReadCloser) (int, interface{}, error)
 
-// Serve loops through all of the protocols sent in to spawns
+// Prepare loops through all of the protocols sent in to spawns
 // off a go routine to setup a serving http.Server for each.
 func (s *Server) Prepare(protoAddrs []string, m map[string]map[string]ServFunc) error {
 	s.createRouter(m, s.cfg)
@@ -130,7 +130,7 @@ func (s *Server) createRouter(m map[string]map[string]ServFunc, cfg *Config) {
 			localMethod := method
 
 			// build the handler function
-			f := makeHttpHandler(cfg.Logging, localMethod, localRoute, localFct, corsHeaders)
+			f := makeHTTPHandler(cfg.Logging, localMethod, localRoute, localFct, corsHeaders)
 
 			// add the new route
 			if localRoute == "" {
@@ -145,7 +145,7 @@ func (s *Server) createRouter(m map[string]map[string]ServFunc, cfg *Config) {
 	return
 }
 
-func makeHttpHandler(logging bool, localMethod string, localRoute string, handlerFunc ServFunc, corsHeaders string) http.HandlerFunc {
+func makeHTTPHandler(logging bool, localMethod string, localRoute string, handlerFunc ServFunc, corsHeaders string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// log the request
 		logrus.Debugf("Calling %s %s", localMethod, localRoute)
@@ -171,9 +171,9 @@ func makeHttpHandler(logging bool, localMethod string, localRoute string, handle
 		// allow a nil body for backwards compatibility
 		var body io.ReadCloser
 		if r.Body != nil && (r.ContentLength > 0 || r.ContentLength == -1) {
-			if err := checkForJson(r); err != nil {
+			if err := checkForJSON(r); err != nil {
 				// post body must be json
-				logrus.Errorf("checkForJsonn returned error: %s", err)
+				logrus.Errorf("checkForJSON returned error: %s", err)
 				httpError(w, err)
 				return
 			}
@@ -195,7 +195,7 @@ func makeHttpHandler(logging bool, localMethod string, localRoute string, handle
 	}
 }
 
-func (s *Server) initTcpSocket(addr string) (l net.Listener, err error) {
+func (s *Server) initTCPSocket(addr string) (l net.Listener, err error) {
 	if s.cfg.TLSConfig == nil || s.cfg.TLSConfig.ClientAuth != tls.RequireAndVerifyClientCert {
 		logrus.Warn("/!\\ DON'T BIND ON ANY IP ADDRESS WITHOUT setting -tlsverify IF YOU DON'T KNOW WHAT YOU'RE DOING /!\\")
 	}
@@ -223,7 +223,7 @@ func (s *Server) newServer(proto, addr string) ([]serverCloser, error) {
 		// won't be ready.
 		<-s.start
 	case "tcp":
-		l, err := s.initTcpSocket(addr)
+		l, err := s.initTCPSocket(addr)
 		if err != nil {
 			return nil, err
 		}
